@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Eduare Clapared Mambata — Générateur de vidéos IA</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    color: #fff;
+  }
+  .card {
+    background: rgba(255,255,255,0.06);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 20px;
+    padding: 32px 28px;
+    max-width: 480px;
+    width: 100%;
+  }
+  h1 {
+    font-size: 1.5rem;
+    margin-bottom: 6px;
+    text-align: center;
+  }
+  p.subtitle {
+    text-align: center;
+    opacity: 0.7;
+    font-size: 0.9rem;
+    margin-bottom: 24px;
+  }
+  textarea {
+    width: 100%;
+    min-height: 110px;
+    padding: 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.2);
+    background: rgba(0,0,0,0.25);
+    color: #fff;
+    font-size: 1rem;
+    resize: vertical;
+    outline: none;
+  }
+  textarea:focus { border-color: #a78bfa; }
+  .char-count {
+    text-align: right;
+    font-size: 0.75rem;
+    opacity: 0.5;
+    margin-top: 4px;
+  }
+  button {
+    width: 100%;
+    margin-top: 16px;
+    padding: 14px;
+    border: none;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #7c3aed, #a78bfa);
+    color: white;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  button:hover { opacity: 0.9; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .status {
+    margin-top: 18px;
+    text-align: center;
+    font-size: 0.9rem;
+    opacity: 0.85;
+    min-height: 20px;
+  }
+  .video-wrap {
+    margin-top: 20px;
+    display: none;
+  }
+  video {
+    width: 100%;
+    border-radius: 12px;
+    background: black;
+  }
+  .spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    vertical-align: middle;
+    margin-right: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .error {
+    color: #fca5a5;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>🎬 Eduare Clapared Mambata</h1>
+    <p class="subtitle">Décris ta scène, reçois une vidéo de 10 secondes</p>
+
+    <textarea id="prompt" maxlength="2500" placeholder="Ex : Un homme regarde par la fenêtre d'un salon éclairé au coucher du soleil, expression triste, caméra qui s'approche lentement..."></textarea>
+    <div class="char-count"><span id="count">0</span>/2500</div>
+
+    <button id="generateBtn">Générer la vidéo</button>
+
+    <div class="status" id="status"></div>
+
+    <div class="video-wrap" id="videoWrap">
+      <video id="resultVideo" controls autoplay loop></video>
+    </div>
+  </div>
+
+<script>
+var promptEl = document.getElementById('prompt');
+var countEl = document.getElementById('count');
+var btn = document.getElementById('generateBtn');
+var statusEl = document.getElementById('status');
+var videoWrap = document.getElementById('videoWrap');
+var resultVideo = document.getElementById('resultVideo');
+
+promptEl.addEventListener('input', function() {
+  countEl.textContent = promptEl.value.length;
+});
+
+btn.addEventListener('click', function() {
+  var prompt = promptEl.value.trim();
+  if (!prompt) {
+    statusEl.innerHTML = '<span class="error">Écris d\'abord une description.</span>';
+    return;
+  }
+
+  btn.disabled = true;
+  videoWrap.style.display = 'none';
+  statusEl.innerHTML = '<span class="spinner"></span>Envoi de la demande...';
+
+  fetch('/api/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt: prompt })
+  })
+  .then(function(res) {
+    return res.json().then(function(data) {
+      if (!res.ok) {
+        throw new Error(data.error || 'Erreur lors de la création de la tâche');
+      }
+      return data;
+    });
+  })
+  .then(function(createData) {
+    var taskId = createData.taskId;
+    statusEl.innerHTML = '<span class="spinner"></span>Génération en cours... (peut prendre 1 à 3 minutes)';
+
+    var attempts = 0;
+    var maxAttempts = 60;
+    var poll = setInterval(function() {
+      attempts++;
+      fetch('/api/status?taskId=' + taskId)
+        .then(function(checkRes) { return checkRes.json(); })
+        .then(function(checkData) {
+          if (checkData.status === 'success' && checkData.videoUrl) {
+            clearInterval(poll);
+            resultVideo.src = checkData.videoUrl;
+            videoWrap.style.display = 'block';
+            statusEl.textContent = 'Vidéo prête !';
+            btn.disabled = false;
+          } else if (checkData.status === 'failed') {
+            clearInterval(poll);
+            statusEl.innerHTML = '<span class="error">La génération a échoué. Réessaie avec une autre description.</span>';
+            btn.disabled = false;
+          } else if (attempts >= maxAttempts) {
+            clearInterval(poll);
+            statusEl.innerHTML = '<span class="error">Ça prend trop de temps, réessaie plus tard.</span>';
+            btn.disabled = false;
+          }
+        })
+        .catch(function() {
+          clearInterval(poll);
+          statusEl.innerHTML = '<span class="error">Erreur de connexion. Réessaie.</span>';
+          btn.disabled = false;
+        });
+    }, 5000);
+  })
+  .catch(function(err) {
+    statusEl.innerHTML = '<span class="error">' + err.message + '</span>';
+    btn.disabled = false;
+  });
+});
+</script>
+</body>
+</html>
